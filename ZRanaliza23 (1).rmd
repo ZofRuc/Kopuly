@@ -1,0 +1,1037 @@
+---
+title: "Kopuly"
+output: html_document
+date: "2023-06-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+install.packages("copula")
+install.packages("VineCopula")
+library(data.table)
+
+library(MASS)
+library(ggplot2)
+library(ggExtra)
+library(copula)
+
+library(VineCopula)
+``` 
+
+```{r}
+Szczyrk = "X249180210"
+```
+
+```{r}
+X <- merged_df[,2:61]
+X <- data.frame(X)
+column_index <- which(names(X) == Szczyrk)
+X <- X[, c(column_index, setdiff(1:ncol(X), column_index))]
+head(X)
+
+dlugosc <- length(X)-1
+#dlugosc <- 2
+
+results <- data.frame(station = character(), kendall = numeric(), copula_par = character(), copula_npar = character(), distance = numeric(), stringsAsFactors = FALSE)
+for (i in 1:dlugosc){
+  X1=X[[1]]
+  X2=X[[i+1]]
+
+  fit.norm1=fitdistr(X1,"normal")
+  fit.norm2=fitdistr(X2,"normal")
+
+  #parametry rozkladow
+  par1=round(fit.norm1$estimate,2)
+  par2=round(fit.norm2$estimate,2)
+
+  U <- data.frame(pnorm(X2,par2[[1]],par2[[2]]),pnorm(X2,par1[[1]],par1[[2]]))
+  U <- data.frame(U)
+  colnames(U) <- c("U1","U2")
+
+  V <- pobs(cbind(X1,X2))
+  V <- data.frame(V)
+  colnames(V) <- c("V1","V2")
+
+  cop.par <- BiCopSelect(U[,1],U[,2])      #na podstawie pseudo-obserwacji parametrycznych 
+  cop.npar <- BiCopSelect(V[,1],V[,2])     #na podstawie obserwavji nieparametrycznych
+
+  #theta.par <-  cop.par$par
+  #theta.npar <-  cop.npar$par
+  
+
+  
+  #tworzymy obiekty 'copula' dla kazdej z kopul
+  frank.cop <- BiCop(family = cop.par$family, par = cop.par$par, par2 = cop.par$par2)
+  norm.cop <- BiCop(family = cop.npar$family, par = cop.npar$par, par2 = cop.npar$par2)
+  
+  N <- 1000
+  #--- proby z kopul
+  U <- BiCopSim(N,frank.cop) 
+  V <- BiCopSim(N,norm.cop)
+  
+  u1=U[,1]; u2=U[,2]
+  v1=V[,1]; v2=V[,2]
+  
+  X.par <- cbind(qnorm(u1,par1[[1]],par2[[2]]),qnorm(u2,par2[[1]],par2[[2]])) #podejscie parametryczne
+  X.npar <- cbind(quantile(X1,v1),quantile(X2,v2))
+  
+  
+  
+  station <- colnames(X)[i]
+  kendall_value <- cor(X,method="kendall")[1,i]
+  copula_par_value <- cop.par$family
+  copula_npar_value <- cop.npar$family
+  distance_value <- "dystans"
+  
+  new_row <- data.frame(station = station, kendall = kendall_value, copula_par = copula_par_value, copula_npar = copula_npar_value, distance = distance_value)
+  results <- rbind(results, new_row)
+  
+}
+
+```
+```{r}
+results$stac <- substring(results$station, 2)
+results_sorted <- results[order(results$stac), ]
+wszystkie_stacje_sorted <- wszystkie_stacje[order(wszystkie_stacje$kod), ]
+```
+
+
+```{r}
+library(ggplot2)
+library(maps)
+library(plotly)
+
+# Przykładowe dane geograficzne stacji meteorologicznych
+stations <- data.frame(
+  station = c(wszystkie_stacje_sorted$kod),
+  longitude = c(wszystkie_stacje_sorted$dlugosc),
+  latitude = c(wszystkie_stacje_sorted$szerokosc)
+)
+
+# Przykładowe wyniki analizy kopułowej
+rezultat <- data.frame(
+  station = c(wszystkie_stacje_sorted$kod),
+  copula_value = c(results_sorted$copula_par)
+)
+
+# Połączenie danych geograficznych stacji z wynikami kopułowymi
+merged_data <- merge(stations, rezultat, by = "station")
+mapa_polski <- map_data("world", "Poland")
+
+# Dyskretny rozkład kolorów
+color_palette <- c("blue", "green", "red")  # Dostosuj kolory do swoich preferencji i wartości kopułowych
+
+
+# Tworzenie interaktywnego wykresu za pomocą plotly
+p <- plot_ly() %>%
+  add_polygons(data = mapa_polski, x = ~long, y = ~lat, color = I("lightgray"), fill = I("lightgray"), line = list(color = I("black"))) %>%
+  add_markers(data = merged_data, x = ~longitude, y = ~latitude, color = ~factor(copula_value), hovertext = wszystkie_stacje_sorted$miasto,
+              size = ~copula_value, colors = color_palette, alpha = 0.8) %>%
+  layout(title = "Map with Copula Results", xaxis = list(title = "Longitude"), yaxis = list(title = "Latitude"))
+
+
+# Wyświetlanie interaktywnego wykresu
+p
+```
+
+```{r}
+library(ggplot2)
+library(maps)
+library(plotly)
+# Przykładowe dane geograficzne stacji meteorologicznych
+stations <- data.frame(
+  station = c(wszystkie_stacje_sorted$kod),
+  longitude = c(wszystkie_stacje_sorted$dlugosc),
+  latitude = c(wszystkie_stacje_sorted$szerokosc)
+)
+
+# Przykładowe wyniki analizy kopułowej
+rezultat <- data.frame(
+  station = c(wszystkie_stacje_sorted$kod),
+  copula_value = c(results_sorted$copula_npar)
+)
+
+# Połączenie danych geograficznych stacji z wynikami kopułowymi
+merged_data <- merge(stations, rezultat, by = "station")
+mapa_polski <- map_data("world", "Poland")
+
+# Dyskretny rozkład kolorów
+color_palette <- c("blue", "green", "red")  # Dostosuj kolory do swoich preferencji i wartości kopułowych
+
+
+# Tworzenie interaktywnego wykresu za pomocą plotly
+p <- plot_ly() %>%
+  add_polygons(data = mapa_polski, x = ~long, y = ~lat, color = I("lightgray"), fill = I("lightgray"), line = list(color = I("black"))) %>%
+  add_markers(data = merged_data, x = ~longitude, y = ~latitude, color = ~factor(copula_value), hovertext = wszystkie_stacje_sorted$miasto,
+              size = ~copula_value, colors = color_palette, alpha = 0.8) %>%
+  layout(title = "Map with Copula Results", xaxis = list(title = "Longitude"), yaxis = list(title = "Latitude"))
+
+
+# Wyświetlanie interaktywnego wykresu
+p
+```
+```{r}
+tabelka_polaczona <- cbind(wszystkie_stacje_sorted, results_sorted)
+tabelka <- tabelka_polaczona%>% select(-5, -10)
+```
+
+```{r}
+library(ggplot2)
+library(maps)
+library(plotly)
+#tabela_polaczona[,4] <- paste0("X", tabela_polaczona[,4])
+colnames(tabelka)<-c("miasto", "szerokosc", "dlugosc", "kod","kendall","copula_par","copula_npar","distance")
+#all <- merge(tabela_polaczona, result, by="station")
+tabelka$group <- cut(tabelka$kendall, breaks = 5)
+
+
+# Mapa z oznaczeniem punktów na podstawie wyników kopułowych
+ggplot() +
+  geom_polygon(data = mapa_polski, aes(x = long, y = lat, group = group), fill = "lightgray") +  # Mapa tła (dostosuj do swoich danych geograficznych)
+  geom_point(data = tabelka, aes(x = dlugosc, y = szerokosc, color = group))+
+  scale_color_manual(values = c("purple", "magenta", "yellow", "orange", "red")) +
+  labs(x = "Longitude", y = "Latitude", color = "Kendal Value") +  # Etykiety osi i legendy
+  ggtitle("Mapa z wartościami tau-Kendala")  # Tytuł mapy
+```
+```{r}
+library(geosphere)
+s0_latitude <- 49.7185
+s0_longitude <- 19.0251
+
+tabelka$distance <- distHaversine(matrix(c(s0_longitude, s0_latitude), nrow = 1),
+                                       matrix(c(tabelka$dlugosc, tabelka$szerokosc), ncol = 2))
+```
+
+```{r}
+tabelka$distance <-round(tabelka$distance / 1000)
+```
+
+
+```{r}
+library(ggplot2)
+
+ggplot(tabelka, aes(x = tabelka$distance, y = tabelka$kendall)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Dystans", y = "Współczynnik Kendalla") +
+  ggtitle("Zależność między dystansem, a Kendallem") +
+  theme_minimal()
+```
+```{r}
+library(geosphere)
+library(ggplot2)
+library(maps)
+library(data.table)
+
+library(MASS)
+library(ggExtra)
+library(copula)
+
+library(VineCopula)
+```
+
+```{r}
+library(MASS)
+X1=X$X249180210
+X2=X$X251200150 
+
+#--- dane na wykresie
+p <- ggplot(X, aes(X1,X2))+geom_point()
+ggMarginal(p, type="histogram")
+
+
+
+fit.norm1=fitdistr(X1,"normal")
+fit.norm2=fitdistr(X2,"normal")
+
+#parametry rozkladow
+par1=round(fit.norm1$estimate,2)
+par2=round(fit.norm2$estimate,2)
+
+#parametryczne
+alpha <- ppoints(100)
+X1_emp <- quantile(X1,alpha)
+X2_emp <- quantile(X2,alpha)
+X1_teo <- qnorm(alpha,par1[1],par1[2])
+X2_teo <- qnorm(alpha,par2[1],par2[2])
+
+par(mfrow=c(2,1))
+plot(X1_emp,X1_teo)
+abline(a=0,b=1,col=2)
+plot(X2_emp,X2_teo)
+abline(a=0,b=1,col=2)
+
+U <- data.frame(pnorm(X2,par2[[1]],par2[[2]]),pnorm(X2,par1[[1]],par1[[2]]))
+colnames(U) <- c("U1","U2")
+head(U)
+
+#nieparametryczne
+V <- pobs(cbind(X1,X2))
+V <- data.frame(V)
+colnames(V) <- c("V1","V2")
+head(V)
+
+#obserwacje i pseudo-obserwacje U i V na wykresach
+p <- ggplot(X, aes(X1,X2))+geom_point()
+p.par <- ggplot(data.frame(U), aes(U1,U2))+geom_point()
+p.npar <- ggplot(data.frame(V), aes(V1,V2))+geom_point()
+ph <- ggMarginal(p, type="histogram")
+ph.par <- ggMarginal(p.par, type="histogram") 
+ph.npar <- ggMarginal(p.npar, type="histogram") 
+
+cowplot::plot_grid(ph,ph.par,ph.npar,ncol=1,nrow=3)
+
+library(VineCopula)
+cop.par <- BiCopSelect(U[,1],U[,2])      #na podstawie pseudo-obserwacji parametrycznych 
+
+cop.npar <- BiCopSelect(V[,1],V[,2])     #na podstawie obserwavji nieparametrycznych
+cop.par; cop.npar
+
+#===== wyniki na wykresach (gestosci, kontury, dane vs. wygenerowane) 
+#parametry kazdej z kopul potrzebne dalej do wykresow
+theta.par <-  cop.par$par
+theta.npar <-  cop.npar$par
+theta.par; theta.npar
+
+#tworzymy obiekty 'copula' dla kazdej z kopul
+norm.cop1 <- BiCop(family = cop.par$family, par = cop.par$par, par2 = cop.par$par2)
+norm.cop2 <- BiCop(family = cop.npar$family, par = cop.npar$par, par2 = cop.npar$par2)
+norm.cop1; norm.cop2
+
+#--- wykresy gestosci kopul 
+p1 <- plot(norm.cop1) 
+p2 <- plot(norm.cop2) 
+cowplot::plot_grid(p1,p2,ncol = 1,nrow = 2)
+
+#--- wykres konturowy (z rozkladami brzegowymi N(0,1))
+#Zobacz CC, Def.3.11, p.59
+par(mfrow=c(1,2))
+contour(norm.cop1) 
+contour(norm.cop2)
+
+N <- 1000
+#--- proby z kopul
+U <- BiCopSim(N,norm.cop1) 
+V <- BiCopSim(N,norm.cop2)
+
+u1=U[,1]; u2=U[,2]
+v1=V[,1]; v2=V[,2]
+
+
+#--- proby z rokladow F=C(F1,F2)
+X.par <- cbind(qnorm(u1,par1[[1]],par2[[2]]),qnorm(u2,par2[[1]],par2[[2]])) #podejscie parametryczne
+X.npar <- cbind(quantile(X1,v1),quantile(X2,v2))            #podejscie nieparametryczne
+
+par(mfrow=c(2,3))
+plot(X.par); plot(X.npar)
+plot(U); plot(V)
+plot(X1,X2)
+
+```
+```{r}
+Xa = X[c("X249180210","X251200150")]
+```
+
+```{r}
+U <- pobs(Xa)
+colnames(U) <- c("u","v")
+Y <- qnorm(U)  #'normalna' normalizacja
+colnames(Y) <- c("y1","y2")
+```
+
+```{r}
+df <- data.frame(Xa,U,Y)
+head(df)
+
+p1 <- ggplot(df, aes(X249180210,X251200150))+  geom_point()
+p2 <- ggplot(df, aes(u,v))+  geom_point()
+p3 <- ggplot(df, aes(y1,y2))+  geom_point()
+ggMarginal(p1, type="histogram")
+ggMarginal(p2, type="histogram")
+ggMarginal(p3, type="histogram")
+
+#cowplot::plot_grid(p1.hist,p2.hist,p3.hist,ncol = 1,nrow = 3)
+
+```
+```{r}
+t1 <- Sys.time()
+cop.npar <- BiCopSelect(U[,1],U[,2])
+t2 <- Sys.time()
+t2-t1 #ok. 30s
+
+cop.npar
+cop.npar$family
+```
+```{r}
+#--- inne kopuly - porownanie, sortujemy wzgledem AIC, BIC
+t1 <- Sys.time()
+comp.npar <- BiCopEstList(U[,1],U[,2])
+t2 <- Sys.time() 
+t2-t1 #30s
+
+comp.npar
+
+AIC3.npar <- head(comp.npar$summary[order(comp.npar$summary$AIC),],3) #204,2,1
+BIC3.npar <- head(comp.npar$summary[order(comp.npar$summary$BIC),],3) #204,1,2
+logLik3.npar <- head(comp.npar$summary[order(comp.npar$summary$logLik,decreasing = TRUE),],3)#204,2,1
+AIC3.npar; BIC3.npar; logLik3.npar
+
+```
+
+```{r}
+#===== dobor kopuly metoda parametryczna 
+#tworzymy pseudo-obserwacje parametryczne
+
+#korzystajac z funkcji fitDist() z biblioteki 'gamlss' dobieramy 
+#najlepszy z rozkladow zaimplementowanych w gamlss.family
+
+t1 <- Sys.time()
+Fits <- lapply(1:2,function(i) fitDist(Xa[,i]))
+t2 <- Sys.time()
+t2-t1 #ok. 2 min
+```
+
+```{r}
+Fits[[1]]$fits  
+Fits[[2]]$fits
+
+par(mfrow=c(2,1))
+	for(i in 1:2){
+ 	 plot(exp((Fits[[i]]$fits[[1]]- Fits[[i]]$fits)/2))
+	}
+
+#dopasowane rozklady
+	lapply(1:2,function(i) Fits[[i]]$fits)
+	sapply(1:2,function(i) Fits[[i]]$family)
+	sapply(1:2,function(i) Fits[[i]]$family[[1]])
+```
+```{r}
+#histogramy i QQ-ploty
+	par(mfrow=c(2,2))
+	hist(Xa$X249180210,prob=TRUE)
+	curve(dSEP2(x, mu=Fits[[1]]$mu,
+          	  sigma= Fits[[1]]$sigma,
+          	  nu = Fits[[1]]$nu,
+           	 tau = Fits[[1]]$tau),col=2,add=TRUE)
+	hist(Xa$X251200150,prob=TRUE)
+	curve(dSHASHo2(x,mu=Fits[[2]]$mu,sigma= Fits[[2]]$sigma),col=2,add=TRUE)
+
+	alpha <- ppoints(100)
+	X1emp <- quantile(Xa$X249180210,alpha)
+	X1teo <- qSEP2(alpha, mu=Fits[[1]]$mu,
+             	  sigma= Fits[[1]]$sigma,
+             	  nu = Fits[[1]]$nu,
+	               tau = Fits[[1]]$tau)
+	X2emp <- quantile(Xa$X251200150,alpha)
+	X2teo <- qSHASHo2(alpha, mu=Fits[[2]]$mu,
+             sigma= Fits[[2]]$sigma)
+
+
+	plot(X1emp,X1teo)
+	abline(a=0,b=1,col=2)
+	plot(X2emp,X2teo)
+	abline(a=0,b=1,col=2)
+
+```
+```{r}
+#==== pseudo-obserwacje parametryczne
+	V <- cbind(pSEP2(Xa[,1], mu=Fits[[1]]$mu,
+                 sigma= Fits[[1]]$sigma,
+                 nu = Fits[[1]]$nu,
+                 tau = Fits[[1]]$tau),
+           pSHASHo2(Xa[,2], mu=Fits[[2]]$mu,
+                  sigma= Fits[[2]]$sigma))
+
+	colnames(V) <- c("v1","v2")
+	Y <- qnorm(V)
+	colnames(Y) <- c("y1","y2")
+
+#wykresy rozrzutu
+	df <- data.frame(Xa,V,Y)
+	head(df)
+	
+	#p1 <- ggplot(df, aes(X249180210,X249180210))+  geom_point()
+	p4 <-ggplot(df, aes(v1,v2))+  geom_point()
+	p5 <-ggplot(df, aes(y1,y2))+  geom_point()
+	ggMarginal(p4, type="histogram")
+	ggMarginal(p5, type="histogram")
+```
+
+
+```{r}
+#--- dobor kopuly
+	t1 <- Sys.time()
+	cop.par <- BiCopSelect(V[,1],V[,2])
+	t2 <- Sys.time()
+	t2-t1 #ok. 40s
+
+	cop.par
+	cop.par$family
+```
+
+```{r}
+#--- inne kopuly - porownanie, sortujemy wzgledem AIC, BIC
+	t1 <- Sys.time()
+	comp.par <- BiCopEstList(V[,1],V[,2])
+	t2 <- Sys.time() 
+	t2-t1 #30s
+
+	comp.par
+```
+
+```{r}
+AIC3.par <- head(comp.par$summary[order(comp.par$summary$AIC),],3) #204,2,1
+	BIC3.par <- head(comp.par$summary[order(comp.par$summary$BIC),],3) #204,1,2
+	logLik3.par <- head(comp.par$summary[order(comp.par$summary$logLik,decreasing = 	TRUE),],3) #204,2,1
+	AIC3.par; BIC3.par; logLik3.par
+
+```
+
+```{r}
+library(kdecopula)
+```
+
+```{r}
+#1 porownanie gestosci empirycznej i teoretycznej kopuly
+p6 <- BiCopKDE(U[,1],U[,2],type = "surface")
+p7 <- plot(cop.npar)
+p8 <- plot(cop.par)
+
+#cowplot::plot_grid(p6,p7,p8,ncol = 1,nrow = 3)
+p6
+p7
+p8
+```
+```{r}
+#2. --- porownanie konturu 'empirycznego' i teoretycznego (kopuly)
+
+BiCopKDE(U[,1],U[,2],type = "contour")
+BiCopKDE(V[,1],V[,2],type = "contour")
+contour(cop.npar)
+contour(cop.par)
+
+#kontur 'empiryczny' inaczej
+	UU <- as.copuladata(U)
+	VV <- as.copuladata(V)
+	pairs(UU)
+	pairs(VV)
+
+```
+```{r}
+#3. --- proby wygenerowane z kopul
+N <- dim(Xa)[1]; N
+
+sem.npar <- BiCopSim(N,cop.npar)
+sem.par <-BiCopSim(N,cop.par)
+
+sem <- data.frame(sem.npar=sem.npar,sem.par=sem.par)
+
+p9 <- ggplot(sem, aes(sem.npar.1,sem.npar.2))+  geom_point()
+p10 <- ggplot(sem, aes(sem.par.1,sem.par.2))+  geom_point()
+p9.hist <- ggMarginal(p9, type="histogram")
+p10.hist <- ggMarginal(p10, type="histogram")
+
+cowplot::plot_grid(p9.hist,p10.hist,ncol = 1,nrow = 2)
+p9.hist
+p10.hist
+```
+```{r}
+
+```
+
+```{r}
+#4. -- proby z rozkladow F=C(F1,F2)
+u1 <- sem.npar[,1];  u2 <- sem.npar[,2]
+v1 <- sem.par[,1];  v2 <- sem.par[,2]
+
+
+x1.npar <- quantile(Xa$X249180210,u1)
+x2.npar <- quantile(Xa$X251200150,u2)
+x1.par <- qSEP2(v1, mu=Fits[[1]]$mu,
+                sigma= Fits[[1]]$sigma,
+                nu = Fits[[1]]$nu,
+                tau = Fits[[1]]$tau)
+x2.par <- qSHASHo2(v2,mu=Fits[[2]]$mu,
+              sigma= Fits[[2]]$sigma)
+
+sem.F <- data.frame(x1.npar=x1.npar,x2.npar =x2.npar,
+                   x1.par=x1.par,x2.par =x2.par)
+head(sem.F)
+
+p11 <- ggplot(sem.F, aes(x1.npar,x2.npar))+  geom_point()
+p12 <- ggplot(sem.F, aes(x1.par,x2.par))+  geom_point()
+p11.hist <- ggMarginal(p11, type="histogram")
+p12.hist <- ggMarginal(p12, type="histogram")
+
+#cowplot::plot_grid(p11.hist,p12.hist,ncol = 1,nrow = 2)
+p11.hist
+p12.hist
+```
+```{r}
+#5. --- porownanie wspolczynnikow ekstremalnych empirycznych  i teoretycznych 
+#estymacja dolnego i gornego wspolczynnika
+p <- 0.01 # cut-off
+
+	(lam.C <- c(lower = fitLambda(U, p = p)[2,1],
+            upper = fitLambda(U, p = p, lower.tail = FALSE)[2,1])) 
+
+	(lam.C <- c(lower = fitLambda(V, p = p)[2,1],
+            upper = fitLambda(V, p = p, lower.tail = FALSE)[2,1])) 
+
+```
+```{r}
+#6.--- wspolczynniki zależnosci ekstremalnych dla pierwszych
+#trzech kopul wybranych przez AIC 
+nAIC3.npar <- as.numeric(rownames(AIC3.npar))
+lu.coeff.AIC3 <- t(sapply(nAIC3.npar,function(i) BiCopPar2TailDep(comp.npar$models[[i]])))
+rownames(lu.coeff.AIC3) <- BiCopName(AIC3.npar[,1])
+lu.coeff.AIC3
+```
+
+```{r}
+X3=X$X254180010
+Xa <- cbind(Xa, X3)
+```
+
+```{r}
+
+```
+
+
+```{r}
+Xa <- Xa %>% rename(X254180010 =X3 )
+```
+
+```{r}
+#Przyklad 1.  Rozklady warunkowe, obliczanie prawdopodobienstw
+#=========
+#C - kopula Gumbela z parmetrem 5
+#F1=F2 - rozklady brzegowe N(0,1)
+#1. P(X<-3|Y=-3) = h2(F1(-3)|F2(-2)))
+#2. P(Y<-3|X=-2) = h1(F2(-3)|F1(-2)))
+
+#-------------- obejrzyjmy probe wygenerowana z kopuly
+semp <- BiCopSim(N=1000,family=4,par=5)
+plot(semp)
+
+#--- 1. P(X<-3|Y=-2) = h2(F1(-3)|F2(-2)))
+cop = BiCop(family=4, par=5); cop #obiekt 'kopula'
+
+u1 = pnorm(-3); u1  #F1(-3)
+u2 = pnorm(-2); u2  #F2(-2)
+
+BiCopHfunc2(u1, u2, cop)
+
+#--- 2. P(Y<-3|X=-2) = h1(F2(-3)|F1(-2)))
+u1 = pnorm(-2); u1  #F1(-2)
+u2 = pnorm(-3); u2  #F2(-3)
+
+BiCopHfunc1(u1, u2, cop)
+```
+
+
+
+```{r}
+#=== B. generujemy probe z rozkladu warunkowego
+
+#--- B1. generowanie z rozkladu F(x1|x2=1)
+x2 <- 1
+
+v <- rep(pnorm(x2),N); head(v)  #warunek v=F2(x2)
+ui <- runif(N,0,1)  #generujemy probe z rozkladu jednostajnego
+
+wi <- BiCopHinv2(ui,v,cop) 
+x1.cond <- qexp(wi)  #kwantyle rozklady wykladniczego
+
+par(mfrow=c(2,1))
+hist(rexp(N),prob=TRUE)  #proba z rozkladu Exp(1)
+hist(x1.cond,prob=TRUE)  #proba po nalozeniu warunku X2=1
+
+#--- B2. generowanie z rozkladu F(x2|x1=1)
+x1=1
+u <- rep(pexp(x1),N); head(u) #warunek F1(x1)
+vi <- runif(N,0,1)
+
+wi <- BiCopHinv1(u,vi,cop)
+x2.cond <- qnorm(wi)
+
+par(mfrow=c(2,1))
+hist(rnorm(N),prob=TRUE)  #proba z rozkladu N(0,1)
+hist(x2.cond,prob=TRUE)  #proba po nalozeniu warunku X1=1
+
+```
+
+```{r}
+hist(Xa$X251200150,prob=TRUE)
+hist(Xa$X249180210,prob=TRUE)
+
+```
+
+
+```{r}
+cop.npar <- BiCop(2,par = 0.93, par2 = 4.72, tau = 0.77)
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+x1=30
+#model nieparametryczny 
+u1.npar <- sum(Xa$X249180210 <= x1)/length(X$X249180210); u1.npar #jaki to kwantyl?  
+#lub wykorzystujac dystrybuante empiryczna
+F1 <- ecdf(X$X249180210)
+u1.npar <- F1(x1); u1.npar
+```
+
+```{r}
+N <- 10000
+#--- 2. generujemy probe N-elementowa z rozkladu jednostajnego
+U1.npar <- rep(u1.npar,N)         #warunek powtorzony N razy
+set.seed(10)
+U2 <- runif(N,0,1)
+```
+
+```{r}
+#--- 3. odwrotna do C(u2|u1), czyli do h2|1
+wi.npar <- BiCopHinv1(U1.npar,U2,cop.npar)
+head(wi.npar)
+```
+
+```{r}
+#--- 4. odwrotna do F1, w przypadku nieparametrycznym do dystrybuanty empirycznej
+x2cond.npar <- quantile(Xa$X251200150,wi.npar)
+
+#dane i proby warunkowe na histogramach 
+par(mfrow=c(3,1))
+hist(Xa$X251200150,prob=TRUE)
+hist(x2cond.npar,prob=TRUE,main ="Łaziska",xlab="temperatury")
+```
+
+```{r}
+#--- prognoza jako średnia z rozkładu warunkowego
+mean(x2cond.npar)
+quantile(x2cond.npar,c(0.05,0.95))
+```
+
+```{r}
+x2=20
+F2 <- ecdf(Xa$X251200150)
+u2.npar <- F2(x2); u2.npar
+```
+
+```{r}
+#--- 2. generujemy probe z rozkladu jednostajnego
+set.seed(10)
+U1 <- runif(N,0,1)
+U2.npar <- rep(u2.npar,N) 
+```
+
+```{r}
+#--- 3. odwrotna do C(u1|u2), czyli do h1|2
+wi.npar <- BiCopHinv2(U1,U2.npar, cop.npar)
+head(wi.npar)
+```
+
+```{r}
+#--- 4. odwrotna do F2, w przypadku nieparametrycznym do dystrybuanty empirycznej
+x1cond.npar <- quantile(Xa$X249180210,wi.npar)
+```
+
+```{r}
+t1 <- Sys.time()
+Fits <- lapply(1:2,function(i) fitDist(Xa[,i]))
+t2 <- Sys.time()
+t2-t1 #ok. 2 min
+```
+
+```{r}
+a1 <- Fits[[1]]$fits  
+a2 <- Fits[[2]]$fits
+```
+
+```{r}
+par(mfrow=c(2,1))
+	for(i in 1:2){
+ 	 plot(exp((Fits[[i]]$fits[[1]]- Fits[[i]]$fits)/2))
+	}
+
+#dopasowane rozklady
+	lapply(1:2,function(i) Fits[[i]]$fits)
+	sapply(1:2,function(i) Fits[[i]]$family)
+	sapply(1:2,function(i) Fits[[i]]$family[[1]])
+```
+
+```{r}
+par(mfrow=c(3,2))
+hist(Xa$X249180210,prob=TRUE, xlab="temperatury",main ="Szczyrk")
+curve(dSEP2(x, mu=Fits[[1]]$mu,
+          	  sigma= Fits[[1]]$sigma,
+          	  nu = Fits[[1]]$nu,
+           	 tau = Fits[[1]]$tau),col=2,add=TRUE)
+hist(Xa$X254180010,prob=TRUE,xlab="temperatury",main ="Łaziska")
+curve(dSHASHo2(x,mu=Fits[[2]]$mu,sigma= Fits[[2]]$sigma),col=2,add=TRUE)
+hist(x1cond.npar,prob=TRUE,xlab="temperatury",main="Szczyek")
+hist(x2cond.npar,prob=TRUE,xlab="temperatury",main="Łaziska")
+
+```
+```{r}
+cop.npar <- BiCop(2,par = 0.93, par2 = 4.72, tau = 0.77)
+
+x1=34.59
+#model nieparametryczny 
+u1.npar <- sum(Xa$X249180210 <= x1)/length(X$X249180210); u1.npar #jaki to kwantyl?  
+#lub wykorzystujac dystrybuante empiryczna
+F1 <- ecdf(X$X249180210)
+u1.npar <- F1(x1); u1.npar
+
+
+N <- 10000
+#--- 2. generujemy probe N-elementowa z rozkladu jednostajnego
+U1.npar <- rep(u1.npar,N)         #warunek powtorzony N razy
+set.seed(10)
+U2 <- runif(N,0,1)
+
+
+wi.npar <- BiCopHinv1(U1.npar,U2,cop.npar)
+head(wi.npar)
+
+#--- 4. odwrotna do F1, w przypadku nieparametrycznym do dystrybuanty empirycznej
+x2cond.npar <- quantile(Xa$X251200150,wi.npar)
+
+#dane i proby warunkowe na histogramach 
+par(mfrow=c(3,1))
+hist(Xa$X251200150,prob=TRUE)
+hist(x2cond.npar,prob=TRUE,main ="Łaziska",xlab="temperatury")
+
+#--- prognoza jako średnia z rozkładu warunkowego
+mean(x2cond.npar)
+quantile(x2cond.npar,c(0.05,0.95))
+
+
+x2=32.43
+F2 <- ecdf(Xa$X251200150)
+u2.npar <- F2(x2); u2.npar
+
+
+
+#--- 2. generujemy probe z rozkladu jednostajnego
+set.seed(10)
+U1 <- runif(N,0,1)
+U2.npar <- rep(u2.npar,N) 
+
+
+#--- 3. odwrotna do C(u1|u2), czyli do h1|2
+wi.npar <- BiCopHinv2(U1,U2.npar, cop.npar)
+head(wi.npar)
+
+
+#--- 4. odwrotna do F2, w przypadku nieparametrycznym do dystrybuanty empirycznej
+x1cond.npar <- quantile(Xa$X249180210,wi.npar)
+
+
+par(mfrow=c(3,2))
+hist(Xa$X249180210,prob=TRUE, xlab="temperatury",main ="Szczyrk")
+curve(dSEP2(x, mu=Fits[[1]]$mu,
+          	  sigma= Fits[[1]]$sigma,
+          	  nu = Fits[[1]]$nu,
+           	 tau = Fits[[1]]$tau),col=2,add=TRUE)
+hist(Xa$X254180010,prob=TRUE,xlab="temperatury",main ="Łaziska")
+curve(dSHASHo2(x,mu=Fits[[2]]$mu,sigma= Fits[[2]]$sigma),col=2,add=TRUE)
+hist(x1cond.npar,prob=TRUE,xlab="temperatury",main="Szczyek")
+hist(x2cond.npar,prob=TRUE,xlab="temperatury",main="Łaziska")
+```
+
+```{r}
+Xb = X[c("X249180210","X254180010")]
+```
+
+```{r}
+t1 <- Sys.time()
+Fits <- lapply(1:2,function(i) fitDist(Xb[,i]))
+t2 <- Sys.time()
+t2-t1 #ok. 2 min
+```
+
+```{r}
+Fits[[1]]$fits  
+Fits[[2]]$fits
+```
+
+```{r}
+lapply(1:2,function(i) Fits[[i]]$fits)
+	sapply(1:2,function(i) Fits[[i]]$family)
+	sapply(1:2,function(i) Fits[[i]]$family[[1]])
+```
+
+
+```{r}
+U <- pobs(Xb)
+t1 <- Sys.time()
+cop.npar <- BiCopSelect(U[,1],U[,2])
+t2 <- Sys.time()
+t2-t1 #ok. 30s
+
+cop.npar
+cop.npar$family
+```
+```{r}
+cop.npar <- BiCop(2,par = 0.93, par2 = 4.72, tau = 0.77)
+```
+
+```{r}
+x1=34.59
+#model nieparametryczny 
+u1.npar <- sum(Xb$X249180210 <= x1)/length(X$X249180210); u1.npar #jaki to kwantyl?  
+#lub wykorzystujac dystrybuante empiryczna
+F1 <- ecdf(X$X249180210)
+u1.npar <- F1(x1); u1.npar
+
+```
+
+```{r}
+N <- 10000
+#--- 2. generujemy probe N-elementowa z rozkladu jednostajnego
+U1.npar <- rep(u1.npar,N)         #warunek powtorzony N razy
+set.seed(10)
+U2 <- runif(N,0,1)
+```
+
+```{r}
+wi.npar <- BiCopHinv1(U1.npar,U2,cop.npar)
+head(wi.npar)
+
+```
+
+```{r}
+#--- 4. odwrotna do F1, w przypadku nieparametrycznym do dystrybuanty empirycznej
+x2cond.npar <- quantile(Xb$X254180010,wi.npar)
+```
+
+```{r}
+#dane i proby warunkowe na histogramach 
+par(mfrow=c(3,1))
+hist(Xb$X254180010,prob=TRUE)
+hist(x2cond.npar,prob=TRUE,main ="Rozewie",xlab="temperatury")
+```
+
+```{r}
+#--- prognoza jako średnia z rozkładu warunkowego
+mean(x2cond.npar)
+quantile(x2cond.npar,c(0.05,0.95))
+```
+
+```{r}
+x2=29.22
+F2 <- ecdf(Xb$X254180010)
+u2.npar <- F2(x2); u2.npar
+```
+
+```{r}
+#--- 2. generujemy probe z rozkladu jednostajnego
+set.seed(10)
+U1 <- runif(N,0,1)
+U2.npar <- rep(u2.npar,N) 
+
+```
+
+```{r}
+#--- 3. odwrotna do C(u1|u2), czyli do h1|2
+wi.npar <- BiCopHinv2(U1,U2.npar, cop.npar)
+head(wi.npar)
+```
+
+```{r}
+#--- 4. odwrotna do F2, w przypadku nieparametrycznym do dystrybuanty empirycznej
+x1cond.npar <- quantile(Xb$X249180210,wi.npar)
+par(mfrow=c(3,2))
+hist(Xb$X249180210,prob=TRUE, xlab="temperatury",main ="Szczyrk")
+curve(dSEP2(x, mu=Fits[[1]]$mu,
+          	  sigma= Fits[[1]]$sigma,
+          	  nu = Fits[[1]]$nu,
+           	 tau = Fits[[1]]$tau),col=2,add=TRUE)
+hist(Xb$X254180010,prob=TRUE,xlab="temperatury",main ="Rozewie")
+curve(dSN1(x,mu=Fits[[2]]$mu,sigma= Fits[[2]]$sigma, nu = Fits[[2]]$nu),col=2,add=TRUE)
+hist(x1cond.npar,prob=TRUE,xlab="temperatury",main="Szczyek")
+hist(x2cond.npar,prob=TRUE,xlab="temperatury",main="Rozewie")
+```
+
+```{r}
+cop.npar <- BiCop(2,par = 0.93, par2 = 4.72, tau = 0.77)
+
+x1=34.65
+#model nieparametryczny 
+u1.npar <- sum(Xb$X249180210 <= x1)/length(X$X249180210); u1.npar #jaki to kwantyl?  
+#lub wykorzystujac dystrybuante empiryczna
+F1 <- ecdf(X$X249180210)
+u1.npar <- F1(x1); u1.npar
+
+
+N <- 10000
+#--- 2. generujemy probe N-elementowa z rozkladu jednostajnego
+U1.npar <- rep(u1.npar,N)         #warunek powtorzony N razy
+set.seed(10)
+U2 <- runif(N,0,1)
+
+
+wi.npar <- BiCopHinv1(U1.npar,U2,cop.npar)
+head(wi.npar)
+
+#--- 4. odwrotna do F1, w przypadku nieparametrycznym do dystrybuanty empirycznej
+x2cond.npar <- quantile(Xb$X254180010,wi.npar)
+
+#dane i proby warunkowe na histogramach 
+par(mfrow=c(3,1))
+hist(Xb$X254180010,prob=TRUE)
+hist(x2cond.npar,prob=TRUE,main ="Rozewie",xlab="temperatury")
+
+#--- prognoza jako średnia z rozkładu warunkowego
+mean(x2cond.npar)
+quantile(x2cond.npar,c(0.05,0.95))
+
+
+x2=29.33
+F2 <- ecdf(Xb$X254180010)
+u2.npar <- F2(x2); u2.npar
+
+
+
+#--- 2. generujemy probe z rozkladu jednostajnego
+set.seed(10)
+U1 <- runif(N,0,1)
+U2.npar <- rep(u2.npar,N) 
+
+
+#--- 3. odwrotna do C(u1|u2), czyli do h1|2
+wi.npar <- BiCopHinv2(U1,U2.npar, cop.npar)
+head(wi.npar)
+
+
+#--- 4. odwrotna do F2, w przypadku nieparametrycznym do dystrybuanty empirycznej
+x1cond.npar <- quantile(Xb$X249180210,wi.npar)
+
+
+par(mfrow=c(3,2))
+hist(Xb$X249180210,prob=TRUE, xlab="temperatury",main ="Szczyrk")
+curve(dSEP2(x, mu=Fits[[1]]$mu,
+          	  sigma= Fits[[1]]$sigma,
+          	  nu = Fits[[1]]$nu,
+           	 tau = Fits[[1]]$tau),col=2,add=TRUE)
+hist(Xb$X254180010,prob=TRUE,xlab="temperatury",main ="Rozewie")
+curve(dSN1(x,mu=Fits[[2]]$mu,sigma= Fits[[2]]$sigma, nu=Fits[[2]]$nu),col=2,add=TRUE)
+hist(x1cond.npar,prob=TRUE,xlab="temperatury",main="Szczyek")
+hist(x2cond.npar,prob=TRUE,xlab="temperatury",main="Rozewie")
+```
+
